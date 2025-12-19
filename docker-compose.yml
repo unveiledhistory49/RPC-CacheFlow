@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    restart: always
+
+  proxy:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - REDIS_URL=redis://redis:6379
+      - UPSTREAM_RPCS=https://api.mainnet-beta.solana.com
+      - CACHE_TTL=60
+      - NODE_ENV=production
+    depends_on:
+      - redis
+    restart: always

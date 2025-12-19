@@ -1,0 +1,51 @@
+{
+  "name": "rpc-cacheflow",
+  "version": "1.0.0",
+  "description": "A high-performance RPC caching proxy designed to reduce costs and latency.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "nodemon src/index.ts",
+    "lint": "eslint src/**/*.ts",
+    "test": "jest"
+  },
+  "keywords": [
+    "rpc",
+    "cache",
+    "proxy",
+    "solana",
+    "ethereum",
+    "redis"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "@types/ws": "^8.18.1",
+    "axios": "^1.13.2",
+    "compression": "^1.8.1",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "helmet": "^8.1.0",
+    "ioredis": "^5.8.2",
+    "prom-client": "^15.1.3",
+    "ws": "^8.18.3",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/compression": "^1.8.1",
+    "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^25.0.3",
+    "@types/supertest": "^6.0.3",
+    "eslint": "^9.39.2",
+    "jest": "^30.2.0",
+    "nodemon": "^3.1.11",
+    "prettier": "^3.7.4",
+    "supertest": "^7.1.4",
+    "ts-jest": "^29.4.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
