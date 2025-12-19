@@ -6,6 +6,8 @@ interface Upstream {
   url: string;
   isHealthy: boolean;
   consecutiveFailures: number;
+  latency: number;
+  averageLatency: number;
 }
 
 export class LoadBalancer {
@@ -18,6 +20,8 @@ export class LoadBalancer {
       url,
       isHealthy: true, // Assume healthy initially
       consecutiveFailures: 0,
+      latency: 0,
+      averageLatency: 0,
     }));
     
     // Start background health checks
@@ -31,21 +35,44 @@ export class LoadBalancer {
 
     if (healthyUpstreams.length === 0) {
       logger.error('CRITICAL: All upstreams are unhealthy! returning random one as hail mary.');
-      // If all are down, round robin through all of them anyway
       const rpc = this.upstreams[this.currentIndex];
       this.currentIndex = (this.currentIndex + 1) % this.upstreams.length;
       return rpc.url;
     }
 
-    // Simple round robin among HEALTHY nodes
-    // Note: this implementation resets the index if the healthy list changes size significantly, 
-    // but for simple cases, we can just find the next healthy one relative to global index.
-    
-    // Better Round Robin:
-    const selected = healthyUpstreams[this.currentIndex % healthyUpstreams.length];
-    this.currentIndex = (this.currentIndex + 1) % healthyUpstreams.length;
+    if (healthyUpstreams.length === 1) {
+      return healthyUpstreams[0].url;
+    }
+
+    // Power of Two Choices (P2C) strategy
+    // Pick two random distinct indices
+    const idx1 = Math.floor(Math.random() * healthyUpstreams.length);
+    let idx2 = Math.floor(Math.random() * healthyUpstreams.length);
+    while (idx2 === idx1) {
+      idx2 = Math.floor(Math.random() * healthyUpstreams.length);
+    }
+
+    const node1 = healthyUpstreams[idx1];
+    const node2 = healthyUpstreams[idx2];
+
+    // Return the one with lower average latency
+    // If averageLatency is 0 (not yet measured), it ranks better (exploration)
+    const selected = node1.averageLatency <= node2.averageLatency ? node1 : node2;
     
     return selected.url;
+  }
+
+  public recordResponseTime(url: string, latency: number) {
+    const upstream = this.upstreams.find((u) => u.url === url);
+    if (upstream) {
+      upstream.latency = latency;
+      if (upstream.averageLatency === 0) {
+        upstream.averageLatency = latency;
+      } else {
+        // Use a smaller alpha for real traffic to avoid jitter (0.1)
+        upstream.averageLatency = (latency * 0.1) + (upstream.averageLatency * 0.9);
+      }
+    }
   }
 
   public stopHealthChecks() {
@@ -76,6 +103,14 @@ export class LoadBalancer {
         }, { timeout: 5000 });
         
         const latency = Date.now() - start;
+        upstream.latency = latency;
+        
+        // Exponential Moving Average (EMA) - alpha = 0.3
+        if (upstream.averageLatency === 0) {
+          upstream.averageLatency = latency;
+        } else {
+          upstream.averageLatency = (latency * 0.3) + (upstream.averageLatency * 0.7);
+        }
         
         if (!upstream.isHealthy) {
           logger.info(`Upstream RECOVERED: ${upstream.url}`);

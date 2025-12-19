@@ -2,41 +2,52 @@ import { Server } from 'http';
 import WebSocket from 'ws';
 import { loadBalancer } from './balancer';
 import { logger } from '../utils/logger';
+import { subscriptionManager } from './wsMultiplexer';
 
 export const setupWebSocketProxy = (server: Server) => {
   const wss = new WebSocket.Server({ noServer: true });
 
   server.on('upgrade', (request, socket, head) => {
-    const upstreamUrl = loadBalancer.getNextRpc();
-    
-    // Convert HTTP URL to WS URL
-    const wsUpstreamUrl = upstreamUrl.replace('http', 'ws');
+    wss.handleUpgrade(request, socket, head, (clientWs) => {
+      const upstreamUrl = loadBalancer.getNextRpc().replace('http', 'ws');
+      const defaultUpstreamWs = new WebSocket(upstreamUrl);
 
-    logger.info(`WebSocket Upgrade request. Forwarding to ${wsUpstreamUrl}`);
-
-    const targetWs = new WebSocket(wsUpstreamUrl);
-
-    targetWs.on('open', () => {
-      wss.handleUpgrade(request, socket, head, (clientWs) => {
-        // Bi-directional pipe
-        const clientStream = WebSocket.createWebSocketStream(clientWs);
-        const targetStream = WebSocket.createWebSocketStream(targetWs);
-
-        clientStream.pipe(targetStream).pipe(clientStream);
-
-        clientWs.on('error', (err) => logger.error('Client WS Error', err));
-        targetWs.on('error', (err) => logger.error('Target WS Error', err));
+      // Handle regular RPC calls over WS (passthrough)
+      clientWs.on('message', (data) => {
+        const message = data.toString();
         
-        clientWs.on('close', () => targetWs.close());
-        targetWs.on('close', () => clientWs.close());
-      });
-    });
+        // Try to multiplex if it's a subscription
+        try {
+          const json = JSON.parse(message);
+          if (json.method && json.method.includes('Subscribe')) {
+            subscriptionManager.handleClientMessage(clientWs, message);
+            return;
+          }
+        } catch (e) {}
 
-    targetWs.on('error', (err) => {
-      logger.error(`Failed to connect to upstream WS: ${wsUpstreamUrl}`, err);
-      socket.destroy();
+        // Fallback: Passthrough to default upstream
+        if (defaultUpstreamWs.readyState === WebSocket.OPEN) {
+          defaultUpstreamWs.send(data);
+        } else {
+          defaultUpstreamWs.once('open', () => defaultUpstreamWs.send(data));
+        }
+      });
+
+      defaultUpstreamWs.on('message', (data) => {
+        if (clientWs.readyState === WebSocket.OPEN) {
+          clientWs.send(data);
+        }
+      });
+
+      clientWs.on('close', () => {
+        defaultUpstreamWs.close();
+        subscriptionManager.removeClient(clientWs);
+      });
+
+      defaultUpstreamWs.on('error', (err) => logger.error('Default Upstream WS Error', err));
+      clientWs.on('error', (err) => logger.error('Client WS Error', err));
     });
   });
 
-  logger.info('WebSocket Proxy initialized (Passthrough mode)');
+  logger.info('WebSocket Proxy initialized with Multiplexing Support');
 };

@@ -29,15 +29,13 @@ describe('LoadBalancer', () => {
     expect(['http://rpc1.com', 'http://rpc2.com']).toContain(rpc);
   });
 
-  it('should round robin between healthy upstreams', () => {
+  it('should return a healthy upstream', () => {
     // Assuming both are healthy initially
     const rpc1 = balancer.getNextRpc();
     const rpc2 = balancer.getNextRpc();
-    const rpc3 = balancer.getNextRpc();
 
-    expect(rpc1).toBe('http://rpc1.com');
-    expect(rpc2).toBe('http://rpc2.com');
-    expect(rpc3).toBe('http://rpc1.com'); // Wraps around
+    expect(['http://rpc1.com', 'http://rpc2.com']).toContain(rpc1);
+    expect(['http://rpc1.com', 'http://rpc2.com']).toContain(rpc2);
   });
 
   it('should continue to return nodes if health check fails only once', async () => {
@@ -70,8 +68,40 @@ describe('LoadBalancer', () => {
      expect(logger.warn).toHaveBeenCalled();
 
      // getNextRpc should still return something (hail mary) and log error
-     const rpc = balancer.getNextRpc();
-     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('All upstreams are unhealthy'));
-     expect(rpc).toBeDefined();
-  });
-});
+         const rpc = balancer.getNextRpc();
+         expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('All upstreams are unhealthy'));
+         expect(rpc).toBeDefined();
+       });
+     
+       it('should prefer lower latency nodes using P2C', () => {
+         // Manually set latencies (accessing private property for test)
+         // @ts-ignore
+         balancer.upstreams[0].averageLatency = 10; // Fast
+         // @ts-ignore
+         balancer.upstreams[1].averageLatency = 100; // Slow
+     
+         // Over many iterations, it should mostly pick the fast one (or at least handle the selection)
+         // Since it's P2C with only 2 nodes, it will ALWAYS compare node 0 and 1 and pick 0.
+         const results = [];
+         for (let i = 0; i < 100; i++) {
+           results.push(balancer.getNextRpc());
+         }
+     
+         const count0 = results.filter(r => r === 'http://rpc1.com').length;
+         const count1 = results.filter(r => r === 'http://rpc2.com').length;
+     
+         expect(count0).toBe(100);
+         expect(count1).toBe(0);
+       });
+     
+       it('should update average latency on recording response time', () => {
+         balancer.recordResponseTime('http://rpc1.com', 50);
+         // @ts-ignore
+         expect(balancer.upstreams[0].averageLatency).toBe(50);
+     
+         balancer.recordResponseTime('http://rpc1.com', 100);
+         // EMA: (100 * 0.1) + (50 * 0.9) = 10 + 45 = 55
+         // @ts-ignore
+         expect(balancer.upstreams[0].averageLatency).toBe(55);
+       });
+     });

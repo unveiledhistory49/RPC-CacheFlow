@@ -3,6 +3,7 @@ import axios from 'axios';
 import { config } from '../config';
 import { redisService } from '../cache/redis';
 import { loadBalancer } from './balancer';
+import { requestCoalescer } from './coalescer';
 import { generateCacheKey } from '../utils/hash';
 import { logger } from '../utils/logger';
 import { 
@@ -42,35 +43,48 @@ const processSingleRequest = async (rpcReq: any, upstreamUrl: string) => {
   }
 
   // 2. Cache Miss - Forward to Upstream
-  cacheMissesTotal.labels(method || 'unknown').inc();
-  const endTimer = upstreamLatency.labels(upstreamUrl, method || 'unknown').startTimer();
+  const forwardToUpstream = async () => {
+    cacheMissesTotal.labels(method || 'unknown').inc();
+    const endTimer = upstreamLatency.labels(upstreamUrl, method || 'unknown').startTimer();
 
-  try {
-    const response = await axios.post(upstreamUrl, rpcReq, {
-      headers: { 'Content-Type': 'application/json' },
-      timeout: 10000,
-    });
-    endTimer();
-
-    const data = response.data;
-
-    // 3. Store in Cache if valid
-    if (isCacheable && cacheKey && data && !data.error && (data.result !== undefined)) {
-      try {
-        await redisService.set(cacheKey, JSON.stringify(data), config.CACHE_TTL);
-      } catch (error) {
-        logger.error('Redis write error', error);
+    try {
+      const response = await axios.post(upstreamUrl, rpcReq, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 10000,
+      });
+      const duration = endTimer();
+      
+      // Record real latency in load balancer
+      if (duration) {
+        loadBalancer.recordResponseTime(upstreamUrl, duration * 1000); // endTimer returns seconds
       }
-    }
 
-    rpcRequestsTotal.labels(method || 'unknown', 'success').inc();
-    return data;
-  } catch (error: any) {
-    endTimer();
-    upstreamErrorsTotal.labels(upstreamUrl, error.code || 'unknown').inc();
-    rpcRequestsTotal.labels(method || 'unknown', 'error').inc();
-    throw error;
+      const data = response.data;
+
+      // 3. Store in Cache if valid
+      if (isCacheable && cacheKey && data && !data.error && (data.result !== undefined)) {
+        try {
+          await redisService.set(cacheKey, JSON.stringify(data), config.CACHE_TTL);
+        } catch (error) {
+          logger.error('Redis write error', error);
+        }
+      }
+
+      rpcRequestsTotal.labels(method || 'unknown', 'success').inc();
+      return data;
+    } catch (error: any) {
+      endTimer();
+      upstreamErrorsTotal.labels(upstreamUrl, error.code || 'unknown').inc();
+      rpcRequestsTotal.labels(method || 'unknown', 'error').inc();
+      throw error;
+    }
+  };
+
+  if (isCacheable && cacheKey) {
+    return requestCoalescer.execute(cacheKey, forwardToUpstream);
   }
+
+  return forwardToUpstream();
 };
 
 export const proxyHandler = async (req: Request, res: Response) => {
