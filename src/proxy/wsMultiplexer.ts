@@ -13,6 +13,9 @@ interface Subscription {
 export class SubscriptionManager {
   private subscriptions = new Map<string, Subscription>();
   
+  // Track pending upstream subscriptions to avoid race conditions
+  private pendingSubscriptions = new Map<string, Promise<void>>();
+  
   // Maps subscriptionId -> key
   private idToKey = new Map<number | string, string>();
   
@@ -23,11 +26,11 @@ export class SubscriptionManager {
     return JSON.stringify({ method, params });
   }
 
-  public handleClientMessage(clientWs: WebSocket, message: string) {
+  public async handleClientMessage(clientWs: WebSocket, message: string) {
     try {
       const json = JSON.parse(message);
       if (json.method && json.method.includes('Subscribe')) {
-        this.handleSubscribe(clientWs, json);
+        await this.handleSubscribe(clientWs, json);
       } else if (json.method && json.method.includes('Unsubscribe')) {
         this.handleUnsubscribe(clientWs, json);
       }
@@ -62,10 +65,11 @@ export class SubscriptionManager {
     }
   }
 
-  private handleSubscribe(clientWs: WebSocket, request: any) {
+  private async handleSubscribe(clientWs: WebSocket, request: any): Promise<void> {
     const key = this.getSubscriptionKey(request.method, request.params);
-    let sub = this.subscriptions.get(key);
-
+    
+    // 1. If we already have a confirmed subscription, multiplex immediately
+    const sub = this.subscriptions.get(key);
     if (sub && sub.subscriptionId !== undefined) {
       logger.info(`Multiplexing existing subscription: ${key}`);
       sub.clients.add(clientWs);
@@ -76,58 +80,87 @@ export class SubscriptionManager {
         result: sub.subscriptionId,
         id: request.id
       }));
-    } else {
-      this.createNewUpstreamSubscription(clientWs, request, key);
+      return;
+    }
+
+    // 2. If a subscription is currently being established, wait for it
+    if (this.pendingSubscriptions.has(key)) {
+      logger.info(`Joining pending subscription: ${key}`);
+      await this.pendingSubscriptions.get(key);
+      // Recurse once to use the confirmed subscription logic
+      return this.handleSubscribe(clientWs, request);
+    }
+
+    // 3. Otherwise, create a new upstream subscription
+    const promise = this.createNewUpstreamSubscription(clientWs, request, key);
+    this.pendingSubscriptions.set(key, promise);
+    try {
+      await promise;
+    } finally {
+      this.pendingSubscriptions.delete(key);
     }
   }
 
-  private createNewUpstreamSubscription(clientWs: WebSocket, request: any, key: string) {
-     const upstreamUrl = loadBalancer.getNextRpc().replace('http', 'ws');
-     const upstreamWs = new WebSocket(upstreamUrl);
+  private createNewUpstreamSubscription(clientWs: WebSocket, request: any, key: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+       const upstreamUrl = loadBalancer.getNextRpc().replace('http', 'ws');
+       const upstreamWs = new WebSocket(upstreamUrl);
+       
+       const timeout = setTimeout(() => {
+         upstreamWs.close();
+         reject(new Error('Upstream subscription timeout'));
+       }, 15000);
 
-     upstreamWs.on('open', () => {
-       upstreamWs.send(JSON.stringify(request));
-     });
+       upstreamWs.on('open', () => {
+         upstreamWs.send(JSON.stringify(request));
+       });
 
-     upstreamWs.on('message', (data) => {
-       const msg = data.toString();
-       const json = JSON.parse(msg);
+       upstreamWs.on('message', (data) => {
+         const msg = data.toString();
+         const json = JSON.parse(msg);
 
-       // If it's the result of the initial subscribe call
-       if (json.id === request.id) {
-         const subId = json.result;
-         const sub = this.subscriptions.get(key);
-         if (sub) {
-           sub.subscriptionId = subId;
-           this.idToKey.set(subId, key);
-           // Send to the initiating client
-           clientWs.send(msg);
+         // If it's the result of the initial subscribe call
+         if (json.id === request.id) {
+           clearTimeout(timeout);
+           const subId = json.result;
+           const sub = this.subscriptions.get(key);
+           if (sub) {
+             sub.subscriptionId = subId;
+             this.idToKey.set(subId, key);
+             // Send to the initiating client
+             clientWs.send(msg);
+           }
+           resolve();
+         } else if (json.method && json.method.includes('Notification')) {
+           // It's a notification!
+           const subId = json.params?.subscription;
+           const subKey = this.idToKey.get(subId);
+           const sub = subKey ? this.subscriptions.get(subKey) : null;
+           
+           if (sub) {
+             sub.clients.forEach(c => {
+               if (c.readyState === WebSocket.OPEN) {
+                 c.send(msg);
+               }
+             });
+           }
          }
-       } else if (json.method && json.method.includes('Notification')) {
-         // It's a notification!
-         // In Solana, the subId is usually in params.subscription
-         const subId = json.params?.subscription;
-         const subKey = this.idToKey.get(subId);
-         const sub = subKey ? this.subscriptions.get(subKey) : null;
-         
-         if (sub) {
-           sub.clients.forEach(c => {
-             if (c.readyState === WebSocket.OPEN) {
-               c.send(msg);
-             }
-           });
-         }
-       }
-     });
+       });
 
-     const sub: Subscription = {
-       method: request.method,
-       params: request.params,
-       upstreamWs,
-       clients: new Set([clientWs])
-     };
-     this.subscriptions.set(key, sub);
-     this.trackClientSub(clientWs, key);
+       upstreamWs.on('error', (err) => {
+         clearTimeout(timeout);
+         reject(err);
+       });
+
+       const sub: Subscription = {
+         method: request.method,
+         params: request.params,
+         upstreamWs,
+         clients: new Set([clientWs])
+       };
+       this.subscriptions.set(key, sub);
+       this.trackClientSub(clientWs, key);
+    });
   }
 
   private trackClientSub(clientWs: WebSocket, key: string) {

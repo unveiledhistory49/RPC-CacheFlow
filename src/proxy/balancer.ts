@@ -34,7 +34,7 @@ export class LoadBalancer {
     const healthyUpstreams = this.upstreams.filter((u) => u.isHealthy);
 
     if (healthyUpstreams.length === 0) {
-      logger.error('CRITICAL: All upstreams are unhealthy! returning random one as hail mary.');
+      // logger.error('CRITICAL: All upstreams are unhealthy! returning random one as hail mary.');
       const rpc = this.upstreams[this.currentIndex];
       this.currentIndex = (this.currentIndex + 1) % this.upstreams.length;
       return rpc.url;
@@ -55,11 +55,19 @@ export class LoadBalancer {
     const node1 = healthyUpstreams[idx1];
     const node2 = healthyUpstreams[idx2];
 
-    // Return the one with lower average latency
-    // If averageLatency is 0 (not yet measured), it ranks better (exploration)
     const selected = node1.averageLatency <= node2.averageLatency ? node1 : node2;
     
     return selected.url;
+  }
+
+  public getStats() {
+    return this.upstreams.map(u => ({
+      url: u.url,
+      healthy: u.isHealthy,
+      latency: u.latency,
+      averageLatency: u.averageLatency,
+      failures: u.consecutiveFailures
+    }));
   }
 
   public recordResponseTime(url: string, latency: number) {

@@ -41,6 +41,21 @@ class RedisService {
   public async expire(key: string, seconds: number): Promise<number> {
       return this.client.expire(key, seconds);
   }
+
+  public async zincrby(key: string, increment: number, member: string): Promise<string> {
+    return this.client.zincrby(key, increment, member);
+  }
+
+  public async zrevrange(key: string, start: number, stop: number, withScores: boolean = false): Promise<string[]> {
+    if (withScores) {
+      return this.client.zrevrange(key, start, stop, 'WITHSCORES');
+    }
+    return this.client.zrevrange(key, start, stop);
+  }
+
+  public async del(key: string): Promise<number> {
+    return this.client.del(key);
+  }
   
   public async disconnect() {
     await this.client.quit();

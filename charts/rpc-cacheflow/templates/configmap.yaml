@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "rpc-cacheflow.fullname" . }}-config
+  labels:
+    {{- include "rpc-cacheflow.labels" . | nindent 4 }}
+data:
+  PORT: "3000"
+  REDIS_URL: {{ .Values.config.redisUrl | quote }}
+  UPSTREAM_RPCS: {{ .Values.config.upstreamRpcs | quote }}
+  CACHE_TTL: {{ .Values.config.cacheTtl | quote }}
+  CACHEABLE_METHODS: {{ .Values.config.cacheableMethods | quote }}
+  RATE_LIMIT_MAX_REQUESTS: {{ .Values.config.rateLimitMaxRequests | quote }}
+  ADMIN_SECRET: {{ .Values.config.adminSecret | quote }}
+  NODE_ENV: "production"

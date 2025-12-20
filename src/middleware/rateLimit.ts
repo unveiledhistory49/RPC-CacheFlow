@@ -14,6 +14,12 @@ export const rateLimitMiddleware = async (req: Request, res: Response, next: Nex
   try {
     const currentCount = await redisService.incr(key);
 
+    // Track global usage stats for the dashboard (Sorted Set)
+    // Fire and forget to not slow down the request
+    redisService.zincrby('rpc_usage_stats', 1, identifier).catch(err => {
+      logger.error('Failed to update usage stats', err);
+    });
+
     if (currentCount === 1) {
       await redisService.expire(key, config.RATE_LIMIT_WINDOW);
     }

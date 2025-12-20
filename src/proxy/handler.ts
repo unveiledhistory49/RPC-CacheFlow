@@ -55,7 +55,7 @@ const processSingleRequest = async (rpcReq: any, upstreamUrl: string) => {
       const duration = endTimer();
       
       // Record real latency in load balancer
-      if (duration) {
+      if (typeof duration === 'number') {
         loadBalancer.recordResponseTime(upstreamUrl, duration * 1000); // endTimer returns seconds
       }
 

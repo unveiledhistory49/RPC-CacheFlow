@@ -10,6 +10,7 @@ import { logger } from './utils/logger';
 import { register } from './utils/metrics';
 import { setupWebSocketProxy } from './proxy/ws';
 import { redisService } from './cache/redis';
+import { adminRouter } from './routes/admin';
 
 export const app = express();
 export const server = createServer(app);
@@ -25,6 +26,9 @@ app.get('/metrics', async (req, res) => {
   res.set('Content-Type', register.contentType);
   res.end(await register.metrics());
 });
+
+// Admin API
+app.use('/api/admin', adminRouter);
 
 // Middleware & Proxy
 app.use(authMiddleware);
