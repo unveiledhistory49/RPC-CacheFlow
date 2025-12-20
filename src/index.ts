@@ -12,6 +12,16 @@ import { setupWebSocketProxy } from './proxy/ws';
 import { redisService } from './cache/redis';
 import { adminRouter } from './routes/admin';
 
+// Global Error Handlers
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection:', reason);
+  process.exit(1);
+});
+
 export const app = express();
 export const server = createServer(app);
 
@@ -45,6 +55,11 @@ if (process.env.NODE_ENV !== 'test') {
     logger.info(`🚀 Gateway Online  | Port: ${config.PORT}`);
     logger.info(`🎯 Load Balancer   | ${config.UPSTREAM_RPCS.length} nodes`);
     logger.info(`🧠 Cache Strategy  | ${config.CACHEABLE_METHODS.length} methods`);
+  });
+
+  server.on('error', (err) => {
+      logger.error('Server startup error:', err);
+      process.exit(1);
   });
 }
 

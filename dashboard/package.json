@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -H localhost -p 3001",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -H localhost -p 3001",
     "lint": "eslint"
   },
   "dependencies": {
@@ -16,6 +16,12 @@
     "react-dom": "19.2.3",
     "recharts": "^3.6.0",
     "swr": "^2.3.8"
+  },
+  "overrides": {
+    "@tremor/react": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    }
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

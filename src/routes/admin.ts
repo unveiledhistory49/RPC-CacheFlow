@@ -20,14 +20,23 @@ router.use(adminAuth);
 // GET /api/admin/stats
 router.get('/stats', async (req, res) => {
   const upstreams = loadBalancer.getStats();
-  
-  // Get raw metrics from register (this is a bit hacky as prom-client doesn't easily export JSON values)
-  // For the dashboard, we'll return the upstream stats and usage leaders.
-  // The frontend can poll /metrics for the charts if needed, or we can parse it here.
-  // For simplicity, we will trust the /metrics endpoint for time-series data and use this for snapshots.
+
+  // Extract metric values
+  const getMetricValue = async (metric: any) => {
+      const value = await metric.get();
+      return value.values.reduce((acc: number, v: any) => acc + v.value, 0);
+  };
+
+  const hits = await getMetricValue(cacheHitsTotal);
+  const misses = await getMetricValue(cacheMissesTotal);
   
   res.json({
     upstreams,
+    cache: {
+      hits,
+      misses,
+      ratio: (hits + misses) > 0 ? (hits / (hits + misses)).toFixed(2) : 0
+    },
     system: {
       uptime: process.uptime(),
       memory: process.memoryUsage(),
