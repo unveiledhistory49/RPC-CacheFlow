@@ -1,7 +1,56 @@
-node_modules
-dist
-.env
-.DS_Store
-coverage
+# dependencies
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# build outputs (TypeScript)
+dist/
+build/
+*.tsbuildinfo
+
+# test / coverage
+coverage/
+.nyc_output/
+
+# logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 *.pid
+
+# env files (keep committed examples)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
+!.env.demo
+
+# Next.js dashboard
+.next/
+out/
+dashboard/.next/
+dashboard/out/
+next-env.d.ts
+
+# production
+/vercel
+.vercel/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# misc
+*.pem
